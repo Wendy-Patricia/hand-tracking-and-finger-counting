@@ -1,11 +1,13 @@
+
 # macOS
 .DS_Store
 
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 .venv/
 .venv-mediapipe/
+venv/
 
 # IDE
 .vscode/
