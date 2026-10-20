@@ -1,42 +1,109 @@
 
 """
-Visualisation du squelette geometrique de la main.
+Visualisation des doigts et du squelette geometrique.
 
-Module B - Applications graphiques.
-
-Affichage :
-- Contour de la main
-- Enveloppe convexe
-- Creux entre les doigts
-- Squelette geometrique
-- Articulations estimees
-- Extremites des doigts
-- Nombre de doigts
+Le contour affiche est limite a la zone de la main.
+L'analyse utilise toujours le contour original complet.
 """
 
 import cv2 as cv
 
-from skeleton_geometry import estimate_skeleton
+from skeleton_geometry import (
+    estimate_palm_base,
+    estimate_skeleton,
+)
 
 
-# Couleurs au format BGR (OpenCV)
+# Couleurs BGR
 COLOR_CONTOUR = (0, 200, 0)
 COLOR_HULL = (255, 100, 0)
 COLOR_SKELETON = (180, 40, 0)
 COLOR_JOINT = (0, 220, 255)
 COLOR_TIP = (0, 0, 255)
-COLOR_WRIST = (255, 0, 255)
+COLOR_PALM = (255, 0, 255)
 COLOR_VALLEY = (0, 100, 255)
+
+# Options de visualisation
+SHOW_CONTOUR = True
+SHOW_HULL = False
+SHOW_VALLEYS = True
+
+
+def draw_hand_contour(frame, contour, analysis):
+    """
+    Dessine uniquement la partie superieure
+    du contour, correspondant approximativement
+    a la main.
+
+    Ne modifie pas le contour utilise pour l'analyse.
+    """
+    palm_base = estimate_palm_base(analysis)
+
+    if palm_base is None:
+        return
+
+    fingertips = analysis.get("fingertips", [])
+
+    if fingertips:
+        top_y = min(int(p[1]) for p in fingertips)
+        hand_height = max(0, palm_base[1] - top_y)
+
+        # Limite legerement sous la base de la paume.
+        cutoff_y = int(
+            palm_base[1] + 0.15 * hand_height
+        )
+    else:
+        cutoff_y = palm_base[1]
+
+    image_height, image_width = frame.shape[:2]
+
+    cutoff_y = max(
+        1,
+        min(cutoff_y, image_height),
+    )
+
+    # Rectangle dans lequel le contour est visible.
+    clip_rect = (
+        0,
+        0,
+        image_width,
+        cutoff_y,
+    )
+
+    points = contour.reshape(-1, 2)
+
+    if len(points) < 2:
+        return
+
+    for i in range(len(points)):
+        start = tuple(
+            map(int, points[i])
+        )
+        end = tuple(
+            map(int, points[(i + 1) % len(points)])
+        )
+
+        visible, clipped_start, clipped_end = cv.clipLine(
+            clip_rect,
+            start,
+            end,
+        )
+
+        if visible:
+            cv.line(
+                frame,
+                clipped_start,
+                clipped_end,
+                COLOR_CONTOUR,
+                2,
+                cv.LINE_AA,
+            )
 
 
 def draw_results(frame, contour, analysis):
     """
-    Dessine les resultats sur une image couleur.
-
-    Compatible avec une image statique
-    ou une image extraite d'une video.
+    Affiche l'analyse de la main sur une image BGR.
     """
-
     output = frame.copy()
 
     if contour is None or not analysis.get(
@@ -49,133 +116,122 @@ def draw_results(frame, contour, analysis):
             cv.FONT_HERSHEY_SIMPLEX,
             0.75,
             (0, 0, 255),
-            2
+            2,
         )
         return output
 
-    # 1. Contour de la main
-    cv.drawContours(
-        output,
-        [contour],
-        -1,
-        COLOR_CONTOUR,
-        2
-    )
-
-    # 2. Enveloppe convexe
-    hull = analysis.get("hull")
-
-    if hull is not None:
-        cv.drawContours(
+    # Contour limite a la region de la main.
+    if SHOW_CONTOUR:
+        draw_hand_contour(
             output,
-            [hull],
-            -1,
-            COLOR_HULL,
-            2
+            contour,
+            analysis,
         )
 
-    # 3. Creux entre les doigts
-    for valley in analysis.get("valleys", []):
-        cv.circle(
-            output,
-            tuple(map(int, valley)),
-            6,
-            COLOR_VALLEY,
-            -1,
-            cv.LINE_AA
-        )
+    # Enveloppe convexe facultative.
+    if SHOW_HULL:
+        hull = analysis.get("hull")
 
-    # 4. Calculer le squelette
+        if hull is not None:
+            cv.drawContours(
+                output,
+                [hull],
+                -1,
+                COLOR_HULL,
+                2,
+            )
+
+    # Creux entre les doigts.
+    if SHOW_VALLEYS:
+        for valley in analysis.get("valleys", []):
+            cv.circle(
+                output,
+                tuple(map(int, valley)),
+                5,
+                COLOR_VALLEY,
+                -1,
+                cv.LINE_AA,
+            )
+
+    # Squelette geometrique.
     skeleton = estimate_skeleton(analysis)
 
     points = skeleton["points"]
     connections = skeleton["connections"]
     finger_chains = skeleton["finger_chains"]
 
-    # 5. Dessiner les connexions du squelette
+    # Connexions.
     for start_id, end_id in connections:
-
         start = tuple(map(int, points[start_id]))
         end = tuple(map(int, points[end_id]))
 
-        # Bordure claire pour rester visible
-        # sur les fonds sombres
         cv.line(
             output,
             start,
             end,
             (255, 255, 255),
             5,
-            cv.LINE_AA
+            cv.LINE_AA,
         )
 
-        # Ligne principale bleu fonce
         cv.line(
             output,
             start,
             end,
             COLOR_SKELETON,
             3,
-            cv.LINE_AA
+            cv.LINE_AA,
         )
 
-    # 6. Identifier les extremites
+    # Extremites identifiees.
     fingertip_ids = {
         chain[-1]
         for chain in finger_chains
     }
 
-    # 7. Dessiner les articulations
+    # Points du squelette.
     for index, point in enumerate(points):
-
         point = tuple(map(int, point))
 
         if index == 0:
-            color = COLOR_WRIST
+            color = COLOR_PALM
             radius = 7
-
         elif index in fingertip_ids:
             color = COLOR_TIP
             radius = 7
-
         else:
             color = COLOR_JOINT
             radius = 5
 
-        # Bordure noire
         cv.circle(
             output,
             point,
             radius + 2,
             (0, 0, 0),
             -1,
-            cv.LINE_AA
+            cv.LINE_AA,
         )
 
-        # Point colore
         cv.circle(
             output,
             point,
             radius,
             color,
             -1,
-            cv.LINE_AA
+            cv.LINE_AA,
         )
 
-    # 8. Afficher le comptage
-    count = analysis.get("count", 0)
-
+    # Informations affichees.
     cv.putText(
         output,
-        f"Doigts estimes : {count}",
+        f"Doigts estimes : {analysis.get('count', 0)}",
         (15, 35),
         cv.FONT_HERSHEY_SIMPLEX,
         0.8,
         (0, 255, 0),
-        2
+        2,
     )
 
-    # 9. Afficher les creux
     cv.putText(
         output,
         f"Creux detectes : {len(analysis.get('valleys', []))}",
@@ -183,10 +239,9 @@ def draw_results(frame, contour, analysis):
         cv.FONT_HERSHEY_SIMPLEX,
         0.6,
         (255, 255, 255),
-        2
+        2,
     )
 
-    # 10. Afficher le nombre de points
     cv.putText(
         output,
         f"Squelette estime : {len(points)} points",
@@ -194,10 +249,9 @@ def draw_results(frame, contour, analysis):
         cv.FONT_HERSHEY_SIMPLEX,
         0.55,
         (255, 255, 255),
-        2
+        2,
     )
 
-    # 11. Avertissement
     if not analysis.get("reliable", False):
         cv.putText(
             output,
@@ -206,7 +260,7 @@ def draw_results(frame, contour, analysis):
             cv.FONT_HERSHEY_SIMPLEX,
             0.55,
             (0, 165, 255),
-            2
+            2,
         )
 
     return output
