@@ -1,111 +1,140 @@
 
+"""
+Application de test du comptage des doigts.
+
+Utilisation :
+    python finger_counter.py tests/hand_5.png
+
+L'image doit contenir une silhouette blanche
+de la main sur un fond noir.
+"""
+
+import argparse
 import cv2 as cv
 
-from hand_geometry import (
-    extract_hand_contour,
-    analyze_hand_geometry
-)
+from hand_geometry import analyze_fingers
+from visualization import draw_results
+
+
+def load_contour(mask):
+    """Extrait le contour principal d'un masque binaire."""
+
+    contours, _ = cv.findContours(
+        mask,
+        cv.RETR_EXTERNAL,
+        cv.CHAIN_APPROX_SIMPLE
+    )
+
+    if not contours:
+        return None
+
+    candidate = max(
+        contours, key=cv.contourArea
+    )
+
+    if cv.contourArea(candidate) < 1000:
+        return None
+
+    return candidate
 
 
 def main():
-    # 1. Carregar a imagem da mao
-    image = cv.imread("tests/hand_5.png")
 
-    if image is None:
-        print("Erro: imagem nao encontrada.")
-        return
-
-    # 2. Extrair o contorno da mao
-    contour, mask = extract_hand_contour(image)
-
-    if contour is None:
-        print("Nenhuma mao encontrada.")
-        return
-
-    # 3. Calcular Convex Hull e Convexity Defects
-    hull, defects = analyze_hand_geometry(contour)
-
-    # Criar copia da imagem para desenhar
-    result = image.copy()
-
-    # 4. Desenhar o contorno da mao - VERDE
-    cv.drawContours(
-        result,
-        [contour],
-        -1,
-        (0, 255, 0),
-        2
+    parser = argparse.ArgumentParser(
+        description=(
+            "Analyse geometrique et comptage "
+            "des doigts d'une main."
+        )
     )
 
-    # 5. Desenhar o Convex Hull - AZUL
-    if hull is not None:
-        cv.drawContours(
-            result,
-            [hull],
-            -1,
-            (255, 0, 0),
-            2
+    parser.add_argument(
+        "image",
+        help=(
+            "Chemin vers une silhouette binaire "
+            "de main (blanc sur noir)."
+        )
+    )
+
+    args = parser.parse_args()
+
+    # 1. Charger le masque
+    mask = cv.imread(
+        args.image,
+        cv.IMREAD_GRAYSCALE
+    )
+
+    if mask is None:
+        raise SystemExit(
+            "Erreur : image introuvable : " + args.image
         )
 
-    # 6. Desenhar os Convexity Defects - VERMELHO
-    if defects is not None:
+    # 2. Garantir un masque binaire
+    _, mask = cv.threshold(
+        mask,
+        127,
+        255,
+        cv.THRESH_BINARY
+    )
 
-        print("Shape dos defects:", defects.shape)
+    # 3. Extraire le contour
+    contour = load_contour(mask)
 
-        # Garantir que cada linha tem 4 valores:
-        # start, end, far, depth
-        defects = defects.reshape(-1, 4)
+    # 4. Analyser la geometrie
+    analysis = analyze_fingers(contour)
 
-        for s, e, f, depth in defects:
+    # 5. Afficher les informations
+    print("\n===== RESULTATS DE L'ANALYSE =====")
 
-            # Converter indices para inteiros
-            s = int(s)
-            e = int(e)
-            f = int(f)
+    print(
+        "Main detectee :",
+        "Oui" if analysis["detected"] else "Non"
+    )
 
-            # Coordenadas dos pontos
-            start = tuple(contour[s][0])
-            end = tuple(contour[e][0])
-            far = tuple(contour[f][0])
+    print(
+        "Doigts estimes :",
+        analysis["count"]
+    )
 
-            # Desenhar o ponto mais profundo
-            cv.circle(
-                result,
-                far,
-                5,
-                (0, 0, 255),
-                -1
-            )
+    print(
+        "Creux detectes :",
+        len(analysis["valleys"])
+    )
 
-            # Desenhar linhas dos defects
-            cv.line(
-                result,
-                start,
-                far,
-                (0, 255, 255),
-                1
-            )
+    print(
+        "Extremites detectees :",
+        len(analysis["fingertips"])
+    )
 
-            cv.line(
-                result,
-                end,
-                far,
-                (0, 255, 255),
-                1
-            )
+    print(
+        "Pouce detecte :",
+        "Oui" if analysis["thumb"] else "Non"
+    )
 
-    else:
-        print("Nenhum Convexity Defect encontrado.")
+    print(
+        "Fiabilite :",
+        "Indication favorable"
+        if analysis["reliable"]
+        else "Comptage incertain"
+    )
 
-    # 7. Mostrar os resultados
-    cv.imshow("Imagem Original", image)
-    cv.imshow("Mascara Binaria", mask)
-    cv.imshow("Hand Geometry", result)
+    # 6. Preparer l'image couleur
+    frame = cv.cvtColor(
+        mask,
+        cv.COLOR_GRAY2BGR
+    )
 
-    # Esperar ate o utilizador pressionar uma tecla
+    # 7. Dessiner les resultats
+    output = draw_results(
+        frame, contour, analysis
+    )
+
+    # 8. Afficher la fenetre
+    cv.imshow(
+        "Analyse geometrique de la main",
+        output
+    )
+
     cv.waitKey(0)
-
-    # Fechar todas as janelas
     cv.destroyAllWindows()
 
 
