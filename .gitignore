@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.venv-mediapipe/
+
+# IDE
+.vscode/
+
+# Fichiers temporaires
+results/
