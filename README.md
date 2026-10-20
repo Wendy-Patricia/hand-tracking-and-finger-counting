@@ -104,3 +104,74 @@ La méthode choisit le plus grand objet correspondant aux couleurs : un visage,
 un bras ou un objet similaire peut donc être sélectionné. Elle ne distingue pas
 plusieurs mains. Les essais physiques de position, de fond et de lumière doivent
 être réalisés sur votre webcam ; leur résultat dépend de votre environnement.
+
+---
+
+# Complément — Mini-projet R516 : thématique 2
+
+## Détection des mains, estimation du squelette et comptage des doigts
+
+Ce complément présente la **partie B**, développée en parallèle de la détection OpenCV décrite ci-dessus. **Les sections précédentes correspondent au README original de la partie A et sont conservées telles quelles.**
+
+La version expérimentale combine les deux traitements sur le même flux vidéo :
+
+- **Partie A (OpenCV)** : acquisition webcam, segmentation HSV, masque binaire et extraction du plus grand contour (`config.py`, `controls.py`, `segmentation.py`, `hand_detection.py`, `pipeline.py`). Le programme autonome `camera.py` et son affichage `rendering.py` sont conservés pour démontrer cette partie séparément.
+- **Partie B (MediaPipe)** : estimation de 21 repères de la main et comptage *approximatif* des doigts tendus à partir d'angles et de distances (`mediapipe_geometry.py`).
+- **Intégration** : `main_mediapipe.py` exécute le traitement HSV et MediaPipe en parallèle et affiche le contour OpenCV avec le squelette et le nombre de doigts estimé.
+
+**MediaPipe n'est utilisé que dans la variante expérimentale, sous réserve de l'autorisation de l'enseignant.** Il effectue sa propre détection sur l'image couleur : l'analyse MediaPipe ne dépend pas du masque HSV, même si les deux résultats sont affichés ensemble.
+
+## Installation de la variante intégrée (macOS)
+
+Utiliser **Python 3.12** avec un environnement dédié, depuis la racine du dépôt :
+
+```bash
+python3.12 -m venv .venv-mediapipe
+source .venv-mediapipe/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-mediapipe.txt
+```
+
+Télécharger le modèle officiel Hand Landmarker (non inclus dans l'archive) :
+
+```bash
+mkdir -p models
+curl -L --fail -o models/hand_landmarker.task \
+  "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+```
+
+Démarrer la version intégrée :
+
+```bash
+python main_mediapipe.py
+```
+
+Pour utiliser une autre caméra : `python main_mediapipe.py --camera 1`.
+Les fenêtres comprennent le flux annoté, le masque binaire et les curseurs HSV. **Q/Échap** quitte ; **R** réinitialise les réglages.
+
+La version autonome de la partie A reste disponible :
+
+```bash
+python camera.py
+```
+
+## Fichiers propres à la partie B
+
+| Fichier | Rôle |
+| --- | --- |
+| `mediapipe_geometry.py` | Création du détecteur, estimation des 21 repères, comptage heuristique, dessin du squelette |
+| `main_mediapipe.py` | Exécution simultanée du pipeline HSV de la partie A et de l'analyse MediaPipe |
+| `requirements-mediapipe.txt` | Dépendances Python pour la variante expérimentale |
+| `models/README.md` | Rappel du modèle à télécharger |
+
+Les anciens scripts de comptage et de squelette **exclusivement OpenCV** ont été retirés de cette branche pour éviter les duplications ; ils restent dans l'historique Git et les autres branches du projet. Aucune fonctionnalité MediaPipe ne doit être annoncée comme faisant partie des méthodes vues en cours.
+
+## Vérification et limites
+
+Tests du traitement de la partie A, sans webcam :
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+

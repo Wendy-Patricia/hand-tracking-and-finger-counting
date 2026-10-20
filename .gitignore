@@ -1,6 +1,7 @@
 
 # macOS
 .DS_Store
+models/*.task
 
 # Python
 __pycache__/
