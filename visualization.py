@@ -222,9 +222,15 @@ def draw_results(frame, contour, analysis):
         )
 
     # Informations affichees.
+    stable = analysis.get('stable_count')
+    # Offline images have no temporal filter; keep their raw count visible.
+    count_label = (f"Doigts stabilises : {stable}" if stable is not None
+                   else "Doigts stabilises : en attente"
+                   if 'stable_count' in analysis
+                   else f"Doigts estimes : {analysis.get('count', 0)}")
     cv.putText(
         output,
-        f"Doigts estimes : {analysis.get('count', 0)}",
+        count_label,
         (15, 35),
         cv.FONT_HERSHEY_SIMPLEX,
         0.8,
@@ -234,7 +240,7 @@ def draw_results(frame, contour, analysis):
 
     cv.putText(
         output,
-        f"Creux detectes : {len(analysis.get('valleys', []))}",
+        f"Mesure : {analysis.get('count', 0)} | Creux : {len(analysis.get('valleys', []))}",
         (15, 67),
         cv.FONT_HERSHEY_SIMPLEX,
         0.6,

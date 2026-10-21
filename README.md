@@ -1,106 +1,204 @@
-# Détection de la main par segmentation HSV
+﻿# Suivi de la main et comptage des doigts
 
-Application Python autonome utilisant OpenCV et la webcam. Aucun modèle ni service
-externe n'est nécessaire. Les images sont traitées localement, sans enregistrement.
+Application Python de détection de la silhouette d'une main et de comptage de
+**0 à 5 doigts**, en temps réel avec une webcam. Le traitement repose uniquement
+sur **OpenCV et NumPy**, sans MediaPipe, réseau neuronal ni modèle préentraîné.
 
-## Installation et lancement
+Les images sont traitées localement, sans enregistrement ni service externe.
 
-Avec Python 3.10 ou supérieur :
+## Fonctionnalités
+
+- Segmentation de la main par réglage des intervalles de couleur HSV.
+- Extraction du plus grand contour correspondant aux couleurs sélectionnées.
+- Estimation du centre et du rayon de la paume.
+- Comptage géométrique des doigts, y compris un pouce latéral et le poing fermé.
+- Stabilisation temporelle pour limiter les variations du nombre affiché.
+- Affichage des extrémités, des creux et d'un squelette géométrique estimé.
+- Analyse d'images sans webcam ni fenêtre graphique.
+
+## Installation
+
+Prérequis : Python 3.10 ou supérieur et une webcam pour l'utilisation en direct.
+Depuis le dossier du projet, sous Windows :
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements.txt
-.\.venv\Scripts\python camera.py
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Pour sélectionner une autre webcam : ajoutez `--camera 1`.
-Une installation OpenCV avec interface graphique est nécessaire ;
-`opencv-python-headless` ne permet pas d'afficher les fenêtres et les curseurs.
+Les dépendances sont `numpy` et `opencv-python`. La version
+`opencv-python-headless` ne convient pas aux applications avec fenêtres et curseurs.
 
-## Organisation
+## Lancement
 
-- `camera.py` : point d'entrée, capture webcam, affichage miroir, boucle et fermeture
-  des ressources.
-- `config.py` : paramètres typés et valeurs par défaut (`ProcessingParameters`),
-  indépendants des libellés de l'interface.
-- `controls.py` : création, lecture et réinitialisation des curseurs OpenCV ;
-  conversion des valeurs de l'interface vers `ProcessingParameters`.
-- `segmentation.py` : conversion BGR → HSV, masque par intervalles, flou gaussien,
-  seuillage binaire, érosion et dilatation.
-- `hand_detection.py` : recherche des contours avec `cv.findContours`, sélection
-  du plus grand contour, enveloppe convexe et rectangle délimitant ; résultat
-  structuré dans `HandDetection`.
-- `pipeline.py` : enchaînement segmentation → détection pour une image BGR ;
-  renvoie un `FrameResult` (masque et détection) sans ouvrir de fenêtre.
-- `rendering.py` : dessin des contours, de l'enveloppe, du rectangle et des textes.
+Pour lancer l'application intégrée avec le comptage et le squelette :
 
-Pour traiter une image depuis un fichier, une vidéo ou une autre interface :
+```powershell
+.\.venv\Scripts\python.exe main_integration.py
+```
+
+Le point d'entrée `camera.py` affiche également la détection et le comptage stabilisé :
+
+```powershell
+.\.venv\Scripts\python.exe camera.py
+```
+
+Pour sélectionner une autre webcam :
+
+```powershell
+.\.venv\Scripts\python.exe main_integration.py --camera 1
+```
+
+## Utilisation et réglages
+
+1. Placez une seule main devant un fond uni, de couleur différente de votre peau.
+2. Présentez la paume face à la caméra, avec le poignet vers le bas.
+3. Dans la fenêtre « Reglages HSV », ajustez les curseurs pour obtenir une main blanche et un fond noir dans le masque binaire.
+4. Écartez les doigts levés pour que leurs silhouettes restent distinctes.
+5. Attendez quelques images pour que le comptage stabilisé apparaisse.
+
+| Réglage | Fonction |
+| --- | --- |
+| H min / H max | Intervalle de teinte, entre 0 et 179. Si le minimum dépasse le maximum, l'intervalle traverse la limite des teintes rouges. |
+| S min / S max | Intervalle de saturation, entre 0 et 255. Les bornes inversées sont remises dans l'ordre. |
+| V min / V max | Intervalle de luminosité, entre 0 et 255. Les bornes inversées sont remises dans l'ordre. |
+| Flou | Taille du noyau gaussien : `2 × valeur + 1`. |
+| Erosions | Réduit les zones blanches et les petits éléments parasites. |
+| Dilatations | Agrandit les zones blanches. Une valeur trop élevée peut fusionner les doigts. |
+| Aire min | Aire minimale du contour retenu, en pixels carrés. |
+
+Les valeurs initiales doivent être adaptées à l'éclairage et au fond.
+
+- **R** : réinitialiser les réglages et l'historique du comptage.
+- **Q** ou **Échap** : quitter.
+- Fermer une fenêtre termine également l'application.
+
+L'affichage présente la mesure instantanée et le nombre stabilisé. La mention
+« en attente » apparaît avant l'obtention d'un résultat stabilisé. La mention
+« Comptage incertain » signale une mesure non validée par les critères géométriques.
+Les extrémités sont rouges, les creux orange et le point de référence de la paume
+magenta. Les articulations du squelette sont estimées par interpolation.
+
+## Méthode de comptage
+
+1. Convertir l'image de BGR vers HSV et construire le masque binaire.
+2. Filtrer le masque et sélectionner son plus grand contour externe admissible.
+3. Estimer la paume par transformée de distance, en limitant l'influence de l'avant-bras.
+4. Rééchantillonner le contour à intervalles réguliers et le lisser.
+5. Rechercher les pics de distance à la paume, puis vérifier leur proéminence et
+   leur courbure locale pour retenir les extrémités des doigts.
+6. Fusionner les candidats trop proches et rechercher les creux par défauts de convexité.
+7. Stabiliser le nombre par vote sur les **7 dernières images**, avec **4 votes**
+   nécessaires pour valider un nouveau nombre.
+
+Les seuils de longueur sont proportionnels au rayon de la paume. Le pouce peut
+être latéral et une silhouette compacte sans extrémité retenue peut être comptée
+comme un poing fermé, soit zéro doigt.
+
+Les images incertaines font vieillir l'historique : un ancien nombre ne reste pas
+indéfiniment affiché. L'absence de main réinitialise immédiatement la stabilisation.
+
+## Organisation du projet
+
+| Fichier | Rôle |
+| --- | --- |
+| `main_integration.py` | Application intégrée : acquisition, comptage stabilisé et squelette. |
+| `camera.py` | Autre point d'entrée webcam avec comptage stabilisé. |
+| `config.py` | Paramètres typés du traitement dans `ProcessingParameters`. |
+| `controls.py` | Création, lecture et réinitialisation des curseurs. |
+| `segmentation.py` | Segmentation HSV, flou, seuillage et morphologie. |
+| `hand_detection.py` | Sélection du contour, enveloppe convexe et description de forme. |
+| `hand_geometry.py` | Analyse géométrique de la paume, des extrémités et des creux. |
+| `temporal_filter.py` | Stabilisation du comptage avec `CountStabilizer`. |
+| `pipeline.py` | Traitement d'une image sans interface graphique. |
+| `rendering.py` | Annotations de la détection de silhouette. |
+| `visualization.py` | Affichage du comptage et du squelette. |
+| `skeleton_geometry.py` | Estimation des points et connexions du squelette. |
+| `finger_counter.py` | Analyse interactive d'une silhouette depuis un fichier. |
+| `test_gestures.py` | Évaluation facultative de masques fournis dans `tests/hand_0.png` à `tests/hand_5.png`. |
+| `tests/` | Tests automatisés sans webcam physique. |
+
+## Traiter une image dans du code
 
 ```python
 import cv2 as cv
+
 from config import ProcessingParameters
 from pipeline import process_frame
 
-frame = cv.imread("main.jpg")
-if frame is None:
+image = cv.imread("main.jpg")
+if image is None:
     raise ValueError("Image introuvable")
-result = process_frame(frame, ProcessingParameters(min_area=2000))
-# result.mask : masque binaire ; result.detection : HandDetection ou None.
+
+resultat = process_frame(image, ProcessingParameters(min_area=2000))
+analyse = resultat.analysis
+
+if analyse["detected"]:
+    print("Nombre de doigts :", analyse["count"])
+    print("Mesure géométriquement plausible :", analyse["reliable"])
+    print("Extrémités :", analyse["fingertips"])
+else:
+    print("Aucune silhouette exploitable")
 ```
 
-Le traitement ne modifie pas l'image source. `draw_detection` dans `rendering.py`
-annote l'image reçue : lui passer `frame.copy()` pour conserver l'original.
-Les fonctions de curseurs sont désormais dans `controls.py`, et `draw_detection`
-dans `rendering.py`. `segment_hand` reçoit un `ProcessingParameters` à la place
-du dictionnaire de libellés de curseurs.
+`FrameResult` contient le masque binaire (`mask`), la détection (`detection`, ou
+`None`) et l'analyse des doigts (`analysis`). Les coordonnées sont exprimées dans
+le repère de l'image source. `process_frame` ne modifie pas cette image et ne
+conserve aucun historique. La stabilisation est appliquée dans les applications
+webcam à l'aide de `CountStabilizer`.
+
+Pour analyser une silhouette blanche sur fond noir depuis un fichier :
+
+```powershell
+.\.venv\Scripts\python.exe finger_counter.py chemin\vers\silhouette.png
+```
 
 ## Tests automatisés
 
 ```powershell
-.\.venv\Scripts\python -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Les tests utilisent des images synthétiques pour vérifier les intervalles HSV,
-la sélection des contours, le filtrage par aire, le traitement sans interface
-et la conservation de l'image source. La fermeture des ressources est vérifiée
-avec une webcam simulée ; les essais physiques restent décrits ci-dessous.
+Les **16 tests automatisés** vérifient notamment :
 
-## Utilisation
+- Les intervalles HSV, la sélection des contours et le filtrage par aire.
+- La conservation de l'image source et le fonctionnement sans interface graphique.
+- Les 32 combinaisons de doigts sur des silhouettes synthétiques et leur miroir.
+- Le comptage de 0 à 5 doigts à trois échelles et avec des rotations de −20°, 0° et +20°.
+- Le pouce seul, le poing fermé et l'influence d'un avant-bras long.
+- Les contours simplifiés, translatés ou dont le point de départ change.
+- La stabilisation, le passage à zéro et l'expiration des résultats anciens.
+- Les deux points d'entrée webcam avec des images simulées et la libération des ressources.
 
-Placez une main devant un fond uni, de couleur différente de votre peau.
-Dans « Reglages HSV », ajustez H (teinte, 0–179), S (saturation, 0–255) et
-V (luminosité, 0–255) pour que la main apparaisse en blanc dans le masque
-et le fond en noir. Les valeurs initiales sont un point de départ à adapter.
-Si H min dépasse H max, l'intervalle traverse la limite des teintes rouges.
-Les bornes S et V sont automatiquement remises dans l'ordre.
+Ces tests ne mesurent pas la précision sur des images de mains réelles.
+Le script facultatif `test_gestures.py` nécessite des masques d'exemple fournis
+séparément ; les tests automatisés génèrent leurs propres silhouettes.
 
-Le curseur « Flou » définit un noyau de taille `2 × valeur + 1`.
-« Erosions » supprime les petits éléments et « Dilatations » agrandit les zones
-blanches ; des valeurs excessives peuvent fusionner les doigts ou les objets.
-« Aire min » filtre les petits contours (en pixels carrés).
-Appuyez sur **R** pour réinitialiser les réglages, **Q** ou **Échap** pour quitter.
-Fermer une fenêtre termine également l'application.
+## Vérification avec une webcam
 
-Le contour est vert, l'enveloppe convexe bleue et le rectangle jaune.
-La forme est décrite de façon indicative : compacte, allongée ou découpée.
-La solidité est le rapport entre l'aire du contour et celle de son enveloppe
-convexe. Une faible solidité peut correspondre à des doigts écartés.
-Cette heuristique ne compte pas les doigts et ne reconnaît pas des gestes.
+Après avoir réglé le masque, effectuez les essais suivants :
 
-## Protocole de test avec la webcam
+| Essai | Points à vérifier |
+| --- | --- |
+| Montrer successivement 0 à 5 doigts | Cohérence des extrémités et du nombre stabilisé, y compris pour le poing. |
+| Lever uniquement le pouce, puis changer de main | Détection du doigt latéral des deux côtés. |
+| Incliner légèrement la main | Maintien du comptage tant que le poignet reste orienté vers le bas. |
+| Rapprocher puis éloigner la main | Stabilité du comptage ; adapter l'aire minimale si nécessaire. |
+| Changer de fond ou d'éclairage | Main blanche et fond noir dans le masque ; réajuster HSV si nécessaire. |
+| Retirer la main du champ | Disparition de la détection et réinitialisation du comptage. |
 
-Effectuez chaque essai après avoir réglé le masque, puis notez la stabilité
-du contour et les éventuelles zones du fond détectées à tort.
+## Limites
 
-| Essai | Variations | Points à vérifier |
-| --- | --- | --- |
-| Positions | Paume ouverte, poing fermé, doigts écartés, rotation | Rectangle et enveloppe suivent la silhouette ; description indicative cohérente |
-| Distance | Main proche puis éloignée | Adapter l'aire minimale si la main devient trop petite |
-| Fonds | Fond uni clair, uni sombre, puis chargé | Repérer les objets de couleur similaire sélectionnés |
-| Éclairage | Lumière naturelle, artificielle, faible, latérale | Réajuster S et V ; observer les ombres et les reflets |
-| Absence de main | Retirer la main du champ | Aucun contour candidat sur un fond correctement exclu |
+La sélection repose sur la couleur et la géométrie, sans reconnaissance sémantique
+de la main. Un visage, un bras ou un objet de couleur similaire peut être retenu.
+Une seule silhouette est analysée : les mains multiples ne sont pas distinguées.
 
-La méthode choisit le plus grand objet correspondant aux couleurs : un visage,
-un bras ou un objet similaire peut donc être sélectionné. Elle ne distingue pas
-plusieurs mains. Les essais physiques de position, de fond et de lumière doivent
-être réalisés sur votre webcam ; leur résultat dépend de votre environnement.
+La paume doit faire face à la caméra et le poignet doit pointer approximativement
+vers le bas. Une main tournée de 90° ou dirigée vers le bas n'est pas prise en charge.
+Des doigts collés, masqués ou repliés derrière la paume ne peuvent pas être
+comptés de manière fiable à partir de la silhouette seule.
+
+Le champ `reliable` indique une plausibilité géométrique, pas une probabilité de
+réussite. Les points du squelette sont interpolés et ne constituent pas une mesure
+réelle des articulations. La qualité du résultat dépend du masque, du fond,
+de l'éclairage et de la visibilité des doigts.

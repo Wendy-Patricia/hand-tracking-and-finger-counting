@@ -38,6 +38,9 @@ def estimate_palm_base(analysis):
 
     center_x, center_y = map(int, center)
 
+    if analysis.get('palm_radius', 0) > 0 and analysis.get('wrist') is not None:
+        return tuple(map(int, analysis['wrist']))
+
     if not fingertips:
         return center_x, center_y
 

@@ -39,18 +39,17 @@ class CountStabilizer:
             self.reset()
             return None
 
-        if not analysis.get("reliable", False):
-            # Ne pas ajouter de mesure incertaine
-            return self.stable_count
-
         count = analysis.get("count")
-
-        if not isinstance(count, int) or not 0 <= count <= 5:
-            return self.stable_count
-
-        self.history.append(count)
-
-        votes = Counter(self.history)
+        valid = (analysis.get("reliable", False)
+                 and isinstance(count, int) and not isinstance(count, bool)
+                 and 0 <= count <= 5)
+        # Uncertain frames also age the window, so a stale count cannot
+        # remain visible indefinitely after the silhouette deteriorates.
+        self.history.append(count if valid else None)
+        votes = Counter(value for value in self.history if value is not None)
+        if not votes:
+            self.stable_count = None
+            return None
 
         candidate, frequency = votes.most_common(1)[0]
 

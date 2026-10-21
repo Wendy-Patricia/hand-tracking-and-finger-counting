@@ -8,6 +8,8 @@ import cv2 as cv
 from controls import WINDOW, create_trackbars, read_parameters, reset_trackbars
 from pipeline import process_frame
 from rendering import draw_detection
+from temporal_filter import CountStabilizer
+from visualization import draw_results
 
 
 VIDEO_WINDOW = "Detection de la main"
@@ -19,6 +21,7 @@ def main(argv=None):
     parser.add_argument("--camera", type=int, default=0, help="Indice de la webcam (défaut : 0)")
     args = parser.parse_args(argv)
     capture = cv.VideoCapture(args.camera)
+    stabilizer = CountStabilizer()
     
     try:
         if not capture.isOpened():
@@ -44,8 +47,13 @@ def main(argv=None):
             parameters = read_parameters()
             result = process_frame(frame, parameters)
             
-            display = draw_detection(frame.copy(), result.detection)
-            cv.putText(display, "Q/Echap : quitter | R : reinitialiser", (15, 30), cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            analysis = result.analysis
+            analysis['stable_count'] = stabilizer.update(analysis)
+            if analysis['detected']:
+                display = draw_results(frame, result.detection.contour, analysis)
+            else:
+                display = draw_detection(frame.copy(), result.detection)
+            cv.putText(display, "Q/Echap : quitter | R : reinitialiser", (15, display.shape[0] - 20), cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             
             cv.imshow(VIDEO_WINDOW, display)
             cv.imshow(MASK_WINDOW, result.mask)
@@ -58,6 +66,7 @@ def main(argv=None):
                 break
             if key in (ord("r"), ord("R")):
                 reset_trackbars()
+                stabilizer.reset()
         return 0
     except (RuntimeError, cv.error) as error:
         print(f"Erreur : {error}", file=sys.stderr)

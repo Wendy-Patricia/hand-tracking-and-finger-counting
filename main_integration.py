@@ -17,9 +17,9 @@ from controls import (
     read_parameters,
     reset_trackbars,
 )
-from hand_geometry import analyze_fingers
 from pipeline import process_frame
 from rendering import draw_detection
+from temporal_filter import CountStabilizer
 from visualization import draw_results
 
 
@@ -27,7 +27,7 @@ VIDEO_WINDOW = "Detection et analyse de la main"
 MASK_WINDOW = "Masque binaire"
 
 
-def main():
+def main(argv=None):
     """Lance la detection et l'analyse en temps reel."""
     parser = argparse.ArgumentParser(
         description="Detection et comptage des doigts."
@@ -40,8 +40,9 @@ def main():
         help="Indice de la webcam (defaut : 0)",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     capture = cv.VideoCapture(args.camera)
+    stabilizer = CountStabilizer()
 
     try:
         if not capture.isOpened():
@@ -70,6 +71,8 @@ def main():
             # Partie A : segmentation HSV et detection.
             parameters = read_parameters()
             result = process_frame(frame, parameters)
+            analysis = result.analysis
+            analysis['stable_count'] = stabilizer.update(analysis)
 
             display = frame.copy()
 
@@ -87,8 +90,6 @@ def main():
                 contour = result.detection.contour
 
                 # Partie B : comptage et squelette.
-                analysis = analyze_fingers(contour)
-
                 if analysis["detected"]:
                     display = draw_results(
                         display,
@@ -121,6 +122,7 @@ def main():
 
             if key in (ord("r"), ord("R")):
                 reset_trackbars()
+                stabilizer.reset()
 
             if any(
                 cv.getWindowProperty(

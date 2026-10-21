@@ -1,10 +1,7 @@
+﻿"""Finger counting from silhouettes using only NumPy and OpenCV.
 
-"""
-Analyse geometrique des doigts a partir d'un contour OpenCV.
-
-Le contour est fourni par le module de detection.
-La methode suppose une main approximativement verticale,
-avec les doigts orientes vers le haut.
+The wrist must point approximately downwards. Length thresholds are relative
+to the inscribed palm radius, rather than the image resolution.
 """
 
 import math
@@ -14,328 +11,134 @@ import numpy as np
 
 
 def _empty():
-    """Retourne une analyse vide."""
-    return {
-        "detected": False,
-        "count": 0,
-        "fingertips": [],
-        "valleys": [],
-        "thumb": None,
-        "hull": None,
-        "center": None,
-        "wrist": None,
-        "skeleton": [],
-        "reliable": False,
-    }
+    return dict(detected=False, count=0, fingertips=[], valleys=[], thumb=None,
+                hull=None, center=None, wrist=None, skeleton=[], reliable=False,
+                palm_radius=0.0)
 
 
-def _fingertip_candidates(contour, mask, center, radius):
-    """
-    Recherche les extremites des doigts a partir
-    du profil radial et de la largeur locale.
-    """
-    points = contour[:, 0, :].astype(np.float64)
+def _resample(contour, spacing):
+    """Uniform arc-length sampling, independent of contour approximation."""
+    points = contour[:, 0, :].astype(float)
+    closed = np.vstack((points, points[0]))
+    lengths = np.linalg.norm(np.diff(closed, axis=0), axis=1)
+    cumulative = np.r_[0, np.cumsum(lengths)]
+    samples = np.linspace(0, cumulative[-1],
+                          max(32, int(cumulative[-1] / spacing)), endpoint=False)
+    return np.column_stack([np.interp(samples, cumulative, closed[:, axis])
+                            for axis in range(2)])
+
+
+def _fingertip_candidates(contour, center, radius):
+    points = _resample(contour, max(1.0, radius * 0.025))
+    # Circular smoothing makes the contour's starting point irrelevant.
+    points = sum(np.roll(points, shift, axis=0) for shift in range(-2, 3)) / 5
     distances = np.linalg.norm(points - center, axis=1)
-    n = len(distances)
-
-    if n < 15:
-        return []
-
-    # Lisser le profil radial.
-    kernel_size = max(7, int(n * 0.018) | 1)
-    kernel = np.ones(kernel_size) / kernel_size
-
-    padded = np.r_[
-        distances[-kernel_size:],
-        distances,
-        distances[:kernel_size],
-    ]
-
-    smooth = np.convolve(
-        padded,
-        kernel,
-        mode="same",
-    )[kernel_size:-kernel_size]
-
-    distance_map = cv.distanceTransform(
-        mask,
-        cv.DIST_L2,
-        5,
-    )
-
-    search_window = min(
-        kernel_size * 4,
-        max(2, n // 4),
-    )
-
+    spacing = cv.arcLength(contour, True) / len(points)
+    step = max(2, round(0.65 * radius / spacing))
+    window = max(step, round(1.2 * radius / spacing))
     candidates = []
-
-    for i in range(n):
-        previous = smooth[(i - 1) % n]
-        following = smooth[(i + 1) % n]
-
-        # Maximum local du profil radial.
-        if not (
-            smooth[i] >= previous
-            and smooth[i] > following
-        ):
+    for i, tip in enumerate(points):
+        distance = distances[i]
+        if distance < 1.4 * radius or tip[1] > center[1] + 0.6 * radius:
             continue
-
-        # Distance minimale au centre de la paume.
-        if smooth[i] <= radius * 1.45:
+        if distance < distances[i - 1] or distance <= distances[(i + 1) % len(points)]:
             continue
-
-        # Les doigts sont supposes au-dessus de la paume.
-        if points[i, 1] >= center[1] - 0.35 * radius:
+        # Require a fall on BOTH sides to reject noise and wrist corners.
+        before = min(distances[(i - j) % len(points)] for j in range(1, window + 1))
+        after = min(distances[(i + j) % len(points)] for j in range(1, window + 1))
+        prominence = distance - max(before, after)
+        if prominence < 0.16 * radius:
             continue
-
-        # Verifier la prominence du maximum.
-        local_min = min(
-            smooth[(i - j) % n]
-            for j in range(1, search_window)
-        )
-
-        if smooth[i] - local_min <= 0.08 * radius:
+        left = points[(i - step) % len(points)] - tip
+        right = points[(i + step) % len(points)] - tip
+        cosine = np.dot(left, right) / max(np.linalg.norm(left) * np.linalg.norm(right), 1e-6)
+        angle = math.degrees(math.acos(float(np.clip(cosine, -1, 1))))
+        if angle > 85:
             continue
+        candidates.append((prominence, distance, tuple(np.rint(tip).astype(int))))
 
-        # Verifier la largeur locale du doigt.
-        tip = points[i]
-        direction = center - tip
-        norm = np.linalg.norm(direction)
-
-        if norm == 0:
-            continue
-
-        inner = tip + (
-            direction / norm
-        ) * (0.45 * radius)
-
-        sx, sy = np.rint(inner).astype(int)
-
-        if not (
-            0 <= sx < mask.shape[1]
-            and 0 <= sy < mask.shape[0]
-        ):
-            continue
-
-        local_half_width = distance_map[sy, sx]
-
-        if (
-            local_half_width > 0.28 * radius
-            or local_half_width < 0.035 * radius
-        ):
-            continue
-
-        fingertip = tuple(
-            map(int, np.rint(tip))
-        )
-
-        candidates.append(
-            (float(smooth[i]), fingertip)
-        )
-
-    # Eviter plusieurs detections sur le meme doigt.
-    candidates.sort(reverse=True)
     selected = []
-
-    for _, tip in candidates:
-        if all(
-            math.dist(tip, other) > 0.38 * radius
-            for other in selected
-        ):
+    for _, _, tip in sorted(candidates, reverse=True):
+        if all(math.dist(tip, other) > 0.55 * radius for other in selected):
             selected.append(tip)
-
-    return sorted(
-        selected[:5],
-        key=lambda point: point[0],
-    )
+    return sorted(selected, key=lambda tip: tip[0])
 
 
 def analyze_fingers(contour):
-    """
-    Analyse les doigts a partir d'un contour OpenCV.
+    """Return count, palm, tips and valleys in the input coordinate system.
 
-    Retourne un dictionnaire contenant le comptage,
-    les extremites, les creux, la paume et le poignet.
+    ``reliable`` indicates geometric plausibility, not recognition of a hand.
+    A well segmented fist is a valid zero. Joined or occluded fingers cannot
+    be recovered reliably from a silhouette alone.
     """
     result = _empty()
-
     if contour is None:
         return result
-
-    contour = np.asarray(
-        contour,
-        dtype=np.int32,
-    ).reshape(-1, 1, 2)
-
-    if (
-        len(contour) < 15
-        or cv.contourArea(contour) < 1000
-    ):
+    contour = np.asarray(contour, dtype=np.int32).reshape(-1, 1, 2)
+    # CHAIN_APPROX_SIMPLE may represent a valid silhouette with four points.
+    if len(contour) < 3 or cv.contourArea(contour) < 1000:
         return result
-
     x, y, width, height = cv.boundingRect(contour)
+    offset = np.array([x - 2, y - 2])
+    local = contour - offset
+    mask = np.zeros((height + 4, width + 4), dtype=np.uint8)
+    cv.drawContours(mask, [local.astype(np.int32)], -1, 255, -1)
+    dense, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)
+    local = max(dense, key=cv.contourArea).reshape(-1, 1, 2)
 
-    # Reconstruire un contour dense a partir du contour
-    # fourni par le module de detection.
-    mask = np.zeros(
-        (y + height + 2, x + width + 2),
-        dtype=np.uint8,
-    )
-
-    cv.drawContours(
-        mask,
-        [contour],
-        -1,
-        255,
-        -1,
-    )
-
-    dense_contours, _ = cv.findContours(
-        mask,
-        cv.RETR_EXTERNAL,
-        cv.CHAIN_APPROX_NONE,
-    )
-
-    if not dense_contours:
-        return result
-
-    contour = max(
-        dense_contours,
-        key=cv.contourArea,
-    )
-
-    # Estimer le centre de la paume.
-    radius_map = cv.distanceTransform(
-        mask,
-        cv.DIST_L2,
-        5,
-    )
-
-    y_start = int(y + 0.38 * height)
-    y_end = int(y + 0.78 * height)
-
-    candidate_map = radius_map.copy()
-    candidate_map[:y_start] = 0
-    candidate_map[y_end:] = 0
-
-    _, radius, _, palm_point = cv.minMaxLoc(
-        candidate_map
-    )
-
+    distance_map = cv.distanceTransform(mask, cv.DIST_L2, 5)
+    # Exclude the lower forearm using hand WIDTH, not full contour height.
+    palm_region = distance_map[:min(height + 2, round(1.65 * width) + 2)]
+    _, radius, _, palm = cv.minMaxLoc(palm_region)
     if radius < 5:
         return result
+    center = np.asarray(palm, dtype=float)
+    tips = _fingertip_candidates(local, center, radius)
 
-    center = np.array(
-        palm_point,
-        dtype=np.float64,
-    )
-    center_tuple = tuple(map(int, center))
-
-    # Detecter les extremites des doigts.
-    fingertips = _fingertip_candidates(
-        contour,
-        mask,
-        center,
-        radius,
-    )
-
-    # Calculer l'enveloppe convexe.
-    hull = cv.convexHull(contour)
-    hull_indices = cv.convexHull(
-        contour,
-        returnPoints=False,
-    )
-
-    # Detecter les creux entre les doigts.
+    hull_indices = cv.convexHull(local, returnPoints=False)
     valleys = []
+    try:
+        defects = cv.convexityDefects(local, hull_indices) if len(hull_indices) >= 4 else None
+    except cv.error:
+        defects = None
+    if defects is not None:
+        for start, end, far, depth in defects.reshape(-1, 4):
+            a, b, v = local[[start, end, far], 0].astype(float)
+            va, vb = a - v, b - v
+            cosine = np.dot(va, vb) / max(np.linalg.norm(va) * np.linalg.norm(vb), 1e-6)
+            if (depth / 256 < 0.3 * radius or cosine < math.cos(math.radians(100))
+                    or v[1] > center[1] + 0.5 * radius):
+                continue
+            if all(math.dist(v, other) > 0.3 * radius for other in valleys):
+                valleys.append(tuple(map(int, v)))
 
-    if (
-        hull_indices is not None
-        and len(hull_indices) >= 4
-    ):
-        try:
-            defects = cv.convexityDefects(
-                contour,
-                hull_indices,
-            )
-        except cv.error:
-            defects = None
+    # Palm-base reference instead of the end of a potentially long arm.
+    wrist = center + [0, radius]
 
-        if defects is not None:
-            for _, _, far_index, depth in defects.reshape(
-                -1, 4
-            ):
-                valley = tuple(
-                    map(
-                        int,
-                        contour[int(far_index), 0],
-                    )
-                )
+    def absolute(point):
+        return tuple(map(int, np.rint(np.asarray(point) + offset)))
 
-                if depth / 256.0 < 0.20 * radius:
-                    continue
-
-                if valley[1] >= center[1] + 0.45 * radius:
-                    continue
-
-                if all(
-                    math.dist(valley, other) > 0.30 * radius
-                    for other in valleys
-                ):
-                    valleys.append(valley)
-
-    # Estimer la position du poignet.
-    contour_points = contour[:, 0, :]
-
-    bottom = contour_points[
-        contour_points[:, 1] >= y + 0.92 * height
-    ]
-
-    if len(bottom):
-        wrist = (
-            int(np.median(bottom[:, 0])),
-            int(np.median(bottom[:, 1])),
-        )
-    else:
-        wrist = (
-            int(center[0]),
-            y + height - 1,
-        )
-
-    # Representation simple conservee pour compatibilite.
-    # Le squelette affiche est calcule dans skeleton_geometry.py.
-    skeleton = [(wrist, center_tuple)]
-    skeleton += [
-        (center_tuple, tip)
-        for tip in fingertips
-    ]
-
-    count = len(fingertips)
-
+    fingertips = [absolute(tip) for tip in tips[:5]]
+    center_tuple, wrist_tuple = absolute(center), absolute(wrist)
+    hull = cv.convexHull(local).reshape(-1, 1, 2)
+    solidity = cv.contourArea(local) / max(cv.contourArea(hull), 1)
+    # Only label a thumb when there is one clear lateral candidate.
+    lateral = [tip for tip in fingertips
+               if abs(tip[0] - center_tuple[0]) > 1.25 * radius
+               and tip[1] > center_tuple[1] - 0.65 * radius]
     result.update(
-        detected=True,
-        count=count,
-        fingertips=fingertips,
-        valleys=valleys,
-        thumb=None,
-        hull=hull,
-        center=center_tuple,
-        wrist=wrist,
-        skeleton=skeleton,
-        reliable=(1 <= count <= 5),
+        detected=True, count=len(fingertips), fingertips=fingertips,
+        valleys=[absolute(v) for v in valleys],
+        thumb=lateral[0] if len(lateral) == 1 else None,
+        hull=(hull + offset).astype(np.int32), center=center_tuple, wrist=wrist_tuple,
+        palm_radius=float(radius),
+        skeleton=[(wrist_tuple, center_tuple)] + [(center_tuple, tip) for tip in fingertips],
+        reliable=(len(tips) <= 5 and (bool(tips) or solidity >= 0.85)),
     )
-
     return result
 
 
 def count_fingers(contour):
-    """Conserve l'interface utilisee par les anciens tests."""
+    """Compatibility interface for callers expecting the original tuple."""
     analysis = analyze_fingers(contour)
-
-    return (
-        analysis["count"],
-        analysis["fingertips"],
-        analysis["valleys"],
-        analysis["thumb"],
-    )
+    return (analysis['count'], analysis['fingertips'], analysis['valleys'], analysis['thumb'])
