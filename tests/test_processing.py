@@ -13,7 +13,7 @@ import camera
 from config import ProcessingParameters
 from hand_detection import detect_hand
 from pipeline import process_frame
-from rendering import draw_detection
+from visualization import draw_detection
 from segmentation import segment_hand
 
 
@@ -57,7 +57,7 @@ class ProcessingTests(unittest.TestCase):
         np.testing.assert_array_equal(frame, original)
         self.assertEqual(result.mask.shape, frame.shape[:2])
         self.assertEqual(set(np.unique(result.mask)), {0, 255})
-        display = draw_detection(frame.copy(), result.detection)
+        display = draw_detection(frame, result.detection)
         self.assertFalse(np.array_equal(display, original))
         np.testing.assert_array_equal(frame, original)
 

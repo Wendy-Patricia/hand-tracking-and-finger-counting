@@ -31,13 +31,8 @@ Les dépendances sont `numpy` et `opencv-python`. La version
 
 ## Lancement
 
-Pour lancer l'application intégrée avec le comptage et le squelette :
-
-```powershell
-.\.venv\Scripts\python.exe main_integration.py
-```
-
-Le point d'entrée `camera.py` affiche également la détection et le comptage stabilisé :
+`camera.py` est le point d'entrée de l'application webcam : détection,
+comptage stabilisé et squelette estimé.
 
 ```powershell
 .\.venv\Scripts\python.exe camera.py
@@ -46,7 +41,7 @@ Le point d'entrée `camera.py` affiche également la détection et le comptage s
 Pour sélectionner une autre webcam :
 
 ```powershell
-.\.venv\Scripts\python.exe main_integration.py --camera 1
+.\.venv\Scripts\python.exe camera.py --camera 1
 ```
 
 ## Utilisation et réglages
@@ -102,8 +97,7 @@ indéfiniment affiché. L'absence de main réinitialise immédiatement la stabil
 
 | Fichier | Rôle |
 | --- | --- |
-| `main_integration.py` | Application intégrée : acquisition, comptage stabilisé et squelette. |
-| `camera.py` | Autre point d'entrée webcam avec comptage stabilisé. |
+| `camera.py` | Application webcam : acquisition, comptage stabilisé et affichage. |
 | `config.py` | Paramètres typés du traitement dans `ProcessingParameters`. |
 | `controls.py` | Création, lecture et réinitialisation des curseurs. |
 | `segmentation.py` | Segmentation HSV, flou, seuillage et morphologie. |
@@ -111,11 +105,9 @@ indéfiniment affiché. L'absence de main réinitialise immédiatement la stabil
 | `hand_geometry.py` | Analyse géométrique de la paume, des extrémités et des creux. |
 | `temporal_filter.py` | Stabilisation du comptage avec `CountStabilizer`. |
 | `pipeline.py` | Traitement d'une image sans interface graphique. |
-| `rendering.py` | Annotations de la détection de silhouette. |
-| `visualization.py` | Affichage du comptage et du squelette. |
+| `visualization.py` | Dessin de la silhouette, des doigts, du comptage et du squelette. |
 | `skeleton_geometry.py` | Estimation des points et connexions du squelette. |
 | `finger_counter.py` | Analyse interactive d'une silhouette depuis un fichier. |
-| `test_gestures.py` | Évaluation facultative de masques fournis dans `tests/hand_0.png` à `tests/hand_5.png`. |
 | `tests/` | Tests automatisés sans webcam physique. |
 
 ## Traiter une image dans du code
@@ -144,8 +136,9 @@ else:
 `FrameResult` contient le masque binaire (`mask`), la détection (`detection`, ou
 `None`) et l'analyse des doigts (`analysis`). Les coordonnées sont exprimées dans
 le repère de l'image source. `process_frame` ne modifie pas cette image et ne
-conserve aucun historique. La stabilisation est appliquée dans les applications
-webcam à l'aide de `CountStabilizer`.
+conserve aucun historique. La stabilisation est appliquée dans l'application
+webcam à l'aide de `CountStabilizer`. Les fonctions de visualisation dessinent
+sur une copie et préservent également l'image source.
 
 Pour analyser une silhouette blanche sur fond noir depuis un fichier :
 
@@ -168,11 +161,11 @@ Les **16 tests automatisés** vérifient notamment :
 - Le pouce seul, le poing fermé et l'influence d'un avant-bras long.
 - Les contours simplifiés, translatés ou dont le point de départ change.
 - La stabilisation, le passage à zéro et l'expiration des résultats anciens.
-- Les deux points d'entrée webcam avec des images simulées et la libération des ressources.
+- L'application webcam avec des images simulées et la libération des ressources.
 
 Ces tests ne mesurent pas la précision sur des images de mains réelles.
-Le script facultatif `test_gestures.py` nécessite des masques d'exemple fournis
-séparément ; les tests automatisés génèrent leurs propres silhouettes.
+Les tests génèrent leurs propres silhouettes et ne nécessitent aucun fichier
+d'image externe.
 
 ## Vérification avec une webcam
 

@@ -1,4 +1,4 @@
-"""Regression tests with procedural silhouettes; no webcam or model needed."""
+"""Tests de comptage avec des silhouettes générées, sans webcam ni modèle."""
 
 import unittest
 from itertools import combinations
@@ -7,18 +7,17 @@ from unittest.mock import patch
 import cv2 as cv
 import numpy as np
 
-from hand_geometry import analyze_fingers, count_fingers
+from hand_geometry import analyze_fingers
 from temporal_filter import CountStabilizer
 from config import ProcessingParameters
 import camera
-import main_integration
 
 
 def hand_mask(count, arm_length=90, raised=None):
     mask = np.zeros((500, 440), np.uint8)
     cv.ellipse(mask, (220, 240), (64, 70), 0, 0, 360, 255, -1)
     cv.rectangle(mask, (186, 270), (254, 300 + arm_length), 255, -1)
-    # Rounded fingers with different lengths and a lateral thumb.
+    # Doigts arrondis de longueurs différentes et pouce latéral.
     fingers = [((188, 210), (173, 108), 12),
                ((216, 200), (212, 78), 12),
                ((244, 206), (252, 96), 12),
@@ -93,9 +92,9 @@ class FingerCountingTests(unittest.TestCase):
         for mode in (cv.CHAIN_APPROX_SIMPLE, cv.CHAIN_APPROX_NONE):
             contour = contour_of(mask, mode)
             for start in (0, len(contour) // 3):
-                count, tips, _, _ = count_fingers(np.roll(contour, start, axis=0))
-                self.assertEqual(count, 5)
-                self.assertEqual(len(tips), count)
+                analysis = analyze_fingers(np.roll(contour, start, axis=0))
+                self.assertEqual(analysis['count'], 5)
+                self.assertEqual(len(analysis['fingertips']), analysis['count'])
 
     def test_empty_and_degenerate_contours(self):
         for contour in (None, np.empty((0, 1, 2)), np.array([[[1, 1]], [[2, 2]], [[3, 3]]])):
@@ -125,29 +124,27 @@ class TemporalTests(unittest.TestCase):
 
 
 class WebcamIntegrationTests(unittest.TestCase):
-    def test_both_entry_points_display_stabilized_count(self):
+    def test_webcam_displays_stabilized_count(self):
         mask = hand_mask(5)
         hsv = np.zeros((*mask.shape, 3), dtype=np.uint8)
         hsv[mask > 0] = (10, 180, 210)
         frame = cv.cvtColor(hsv, cv.COLOR_HSV2BGR)
-        for app in (camera, main_integration):
-            with self.subTest(app=app.__name__), \
-                    patch.object(app.cv, 'VideoCapture') as factory, \
-                    patch.object(app.cv, 'namedWindow'), \
-                    patch.object(app.cv, 'imshow'), \
-                    patch.object(app.cv, 'waitKey', side_effect=[-1, -1, -1, ord('q')]), \
-                    patch.object(app.cv, 'getWindowProperty', return_value=1), \
-                    patch.object(app.cv, 'destroyAllWindows'), \
-                    patch.object(app, 'create_trackbars'), \
-                    patch.object(app, 'read_parameters', return_value=ProcessingParameters(
-                        blur=0, erosions=0, dilations=0)), \
-                    patch.object(app, 'draw_results', wraps=app.draw_results) as draw:
-                factory.return_value.isOpened.return_value = True
-                factory.return_value.read.return_value = (True, frame)
-                self.assertEqual(app.main([]), 0)
-                self.assertEqual(draw.call_count, 4)
-                self.assertEqual(draw.call_args.args[2]['stable_count'], 5)
-                factory.return_value.release.assert_called_once()
+        with patch.object(camera.cv, 'VideoCapture') as factory, \
+                patch.object(camera.cv, 'namedWindow'), \
+                patch.object(camera.cv, 'imshow'), \
+                patch.object(camera.cv, 'waitKey', side_effect=[-1, -1, -1, ord('q')]), \
+                patch.object(camera.cv, 'getWindowProperty', return_value=1), \
+                patch.object(camera.cv, 'destroyAllWindows'), \
+                patch.object(camera, 'create_trackbars'), \
+                patch.object(camera, 'read_parameters', return_value=ProcessingParameters(
+                    blur=0, erosions=0, dilations=0)), \
+                patch.object(camera, 'draw_results', wraps=camera.draw_results) as draw:
+            factory.return_value.isOpened.return_value = True
+            factory.return_value.read.return_value = (True, frame)
+            self.assertEqual(camera.main([]), 0)
+            self.assertEqual(draw.call_count, 4)
+            self.assertEqual(draw.call_args.args[2]['stable_count'], 5)
+            factory.return_value.release.assert_called_once()
 
 
 if __name__ == '__main__':
