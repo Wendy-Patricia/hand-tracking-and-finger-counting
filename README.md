@@ -1,16 +1,41 @@
-# Détection de la main par segmentation HSV
+﻿# Suivi de la main et comptage des doigts
 
-Application Python autonome utilisant OpenCV et la webcam. Aucun modèle ni service
-externe n'est nécessaire. Les images sont traitées localement, sans enregistrement.
+Application Python de détection de la silhouette d'une main et de comptage de
+**0 à 5 doigts**, en temps réel avec une webcam. Le traitement repose uniquement
+sur **OpenCV et NumPy**, sans MediaPipe, réseau neuronal ni modèle préentraîné.
 
-## Installation et lancement
+Les images sont traitées localement, sans enregistrement ni service externe.
 
-Avec Python 3.10 ou supérieur :
+## Fonctionnalités
+
+- Segmentation de la main par réglage des intervalles de couleur HSV.
+- Extraction du plus grand contour correspondant aux couleurs sélectionnées.
+- Estimation du centre et du rayon de la paume.
+- Comptage géométrique des doigts, y compris un pouce latéral et le poing fermé.
+- Stabilisation temporelle pour limiter les variations du nombre affiché.
+- Affichage des extrémités, des creux et d'un squelette géométrique estimé.
+- Analyse d'images sans webcam ni fenêtre graphique.
+
+## Installation
+
+Prérequis : Python 3.10 ou supérieur et une webcam pour l'utilisation en direct.
+Depuis le dossier du projet, sous Windows :
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements.txt
-.\.venv\Scripts\python camera.py
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+Les dépendances sont `numpy` et `opencv-python`. La version
+`opencv-python-headless` ne convient pas aux applications avec fenêtres et curseurs.
+
+## Lancement
+
+`camera.py` est le point d'entrée de l'application webcam : détection,
+comptage stabilisé et squelette estimé.
+
+```powershell
+.\.venv\Scripts\python.exe camera.py
 ```
 
 Pour sélectionner une autre webcam : ajoutez `--camera 1`.
@@ -58,11 +83,12 @@ Pour conserver également le masque et les annotations :
 
 ```python
 import cv2 as cv
+
 from config import ProcessingParameters
 from pipeline import process_frame
 
-frame = cv.imread("main.jpg")
-if frame is None:
+image = cv.imread("main.jpg")
+if image is None:
     raise ValueError("Image introuvable")
 result = process_frame(frame, ProcessingParameters(min_area=2000))
 # result.mask : masque binaire ; result.detection : HandDetection ou None.
@@ -79,7 +105,7 @@ du dictionnaire de libellés de curseurs.
 ## Tests automatisés
 
 ```powershell
-.\.venv\Scripts\python -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
 Les tests utilisent des images synthétiques pour vérifier les intervalles HSV,

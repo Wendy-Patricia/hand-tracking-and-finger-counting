@@ -1,56 +1,43 @@
 
-"""
-Stabilisation temporelle du comptage des doigts.
-
-Module B - Traitement des resultats image par image.
-"""
+"""Stabilisation du comptage par vote sur une fenêtre d'images."""
 
 from collections import Counter, deque
 
 
 class CountStabilizer:
-    """Stabilise le nombre de doigts sur plusieurs images."""
+    """Conserve le dernier nombre confirmé et laisse expirer les mesures anciennes."""
 
     def __init__(self, window=7, min_votes=4):
         if window < 1:
-            raise ValueError(
-                "La taille de la fenetre doit etre positive."
-            )
+            raise ValueError("La taille de la fenêtre doit être positive.")
 
         if not 1 <= min_votes <= window:
-            raise ValueError(
-                "Le nombre de votes est invalide."
-            )
+            raise ValueError("Le nombre de votes est invalide.")
 
         self.history = deque(maxlen=window)
         self.min_votes = min_votes
         self.stable_count = None
 
     def update(self, analysis):
-        """
-        Met a jour la stabilisation.
-
-        Retourne :
-            int : nombre stabilise
-            None : resultat indisponible
-        """
+        """Renvoie le nombre stabilisé, ou None si aucun résultat n'est disponible."""
 
         if not analysis.get("detected", False):
             self.reset()
             return None
 
-        if not analysis.get("reliable", False):
-            # Ne pas ajouter de mesure incertaine
-            return self.stable_count
-
         count = analysis.get("count")
-
-        if not isinstance(count, int) or not 0 <= count <= 5:
-            return self.stable_count
-
-        self.history.append(count)
-
-        votes = Counter(self.history)
+        valid = (
+            analysis.get("reliable", False)
+            and isinstance(count, int)
+            and not isinstance(count, bool)
+            and 0 <= count <= 5
+        )
+        # Les images incertaines font aussi vieillir les mesures précédentes.
+        self.history.append(count if valid else None)
+        votes = Counter(value for value in self.history if value is not None)
+        if not votes:
+            self.stable_count = None
+            return None
 
         candidate, frequency = votes.most_common(1)[0]
 
@@ -60,6 +47,6 @@ class CountStabilizer:
         return self.stable_count
 
     def reset(self):
-        """Reinitialise l'historique et le comptage."""
+        """Réinitialise l'historique et le comptage."""
         self.history.clear()
         self.stable_count = None

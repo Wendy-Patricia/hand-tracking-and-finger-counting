@@ -1,141 +1,40 @@
-
-"""
-Application de test du comptage des doigts.
-
-Utilisation :
-    python finger_counter.py tests/hand_5.png
-
-L'image doit contenir une silhouette blanche
-de la main sur un fond noir.
-"""
+﻿"""Analyse d'une silhouette blanche sur fond noir : python finger_counter.py image.png."""
 
 import argparse
+
 import cv2 as cv
 
+from hand_detection import detect_hand
 from hand_geometry import analyze_fingers
 from visualization import draw_results
 
 
-def load_contour(mask):
-    """Extrait le contour principal d'un masque binaire."""
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Comptage des doigts sur une silhouette.")
+    parser.add_argument("image", help="Chemin du masque : main blanche sur fond noir.")
+    args = parser.parse_args(argv)
 
-    contours, _ = cv.findContours(
-        mask,
-        cv.RETR_EXTERNAL,
-        cv.CHAIN_APPROX_SIMPLE
-    )
-
-    if not contours:
-        return None
-
-    candidate = max(
-        contours, key=cv.contourArea
-    )
-
-    if cv.contourArea(candidate) < 1000:
-        return None
-
-    return candidate
-
-
-def main():
-
-    parser = argparse.ArgumentParser(
-        description=(
-            "Analyse geometrique et comptage "
-            "des doigts d'une main."
-        )
-    )
-
-    parser.add_argument(
-        "image",
-        help=(
-            "Chemin vers une silhouette binaire "
-            "de main (blanc sur noir)."
-        )
-    )
-
-    args = parser.parse_args()
-
-    # 1. Charger le masque
-    mask = cv.imread(
-        args.image,
-        cv.IMREAD_GRAYSCALE
-    )
-
+    mask = cv.imread(args.image, cv.IMREAD_GRAYSCALE)
     if mask is None:
-        raise SystemExit(
-            "Erreur : image introuvable : " + args.image
-        )
+        parser.error(f"Image introuvable : {args.image}")
 
-    # 2. Garantir un masque binaire
-    _, mask = cv.threshold(
-        mask,
-        127,
-        255,
-        cv.THRESH_BINARY
-    )
-
-    # 3. Extraire le contour
-    contour = load_contour(mask)
-
-    # 4. Analyser la geometrie
+    _, mask = cv.threshold(mask, 127, 255, cv.THRESH_BINARY)
+    detection = detect_hand(mask, min_area=1000)
+    contour = detection.contour if detection is not None else None
     analysis = analyze_fingers(contour)
 
-    # 5. Afficher les informations
-    print("\n===== RESULTATS DE L'ANALYSE =====")
+    print("Main détectée :", "oui" if analysis["detected"] else "non")
+    print("Doigts estimés :", analysis["count"])
+    print("Creux détectés :", len(analysis["valleys"]))
+    print("Pouce détecté :", "oui" if analysis["thumb"] is not None else "non")
+    print("Comptage :", "plausible" if analysis["reliable"] else "incertain")
 
-    print(
-        "Main detectee :",
-        "Oui" if analysis["detected"] else "Non"
-    )
-
-    print(
-        "Doigts estimes :",
-        analysis["count"]
-    )
-
-    print(
-        "Creux detectes :",
-        len(analysis["valleys"])
-    )
-
-    print(
-        "Extremites detectees :",
-        len(analysis["fingertips"])
-    )
-
-    print(
-        "Pouce detecte :",
-        "Oui" if analysis["thumb"] else "Non"
-    )
-
-    print(
-        "Fiabilite :",
-        "Indication favorable"
-        if analysis["reliable"]
-        else "Comptage incertain"
-    )
-
-    # 6. Preparer l'image couleur
-    frame = cv.cvtColor(
-        mask,
-        cv.COLOR_GRAY2BGR
-    )
-
-    # 7. Dessiner les resultats
-    output = draw_results(
-        frame, contour, analysis
-    )
-
-    # 8. Afficher la fenetre
-    cv.imshow(
-        "Analyse geometrique de la main",
-        output
-    )
-
-    cv.waitKey(0)
-    cv.destroyAllWindows()
+    frame = cv.cvtColor(mask, cv.COLOR_GRAY2BGR)
+    try:
+        cv.imshow("Analyse de la silhouette", draw_results(frame, contour, analysis))
+        cv.waitKey(0)
+    finally:
+        cv.destroyAllWindows()
 
 
 if __name__ == "__main__":
