@@ -27,14 +27,34 @@ Une installation OpenCV avec interface graphique est nécessaire ;
   conversion des valeurs de l'interface vers `ProcessingParameters`.
 - `segmentation.py` : conversion BGR → HSV, masque par intervalles, flou gaussien,
   seuillage binaire, érosion et dilatation.
-- `hand_detection.py` : recherche des contours avec `cv.findContours`, sélection
-  du plus grand contour, enveloppe convexe et rectangle délimitant ; résultat
-  structuré dans `HandDetection`.
+- `hand_detection.py` : `detect_hand(frame)` reçoit une image BGR et renvoie
+  le plus grand contour candidat (`np.ndarray`) ou `None`. `describe_hand`
+  calcule séparément les annotations `HandDetection`.
+- `finger_counting.py` : `count_fingers(contour)` renvoie `(count, fingertips)`,
+  avec une liste de coordonnées `(x, y)` dans l'image d'origine.
 - `pipeline.py` : enchaînement segmentation → détection pour une image BGR ;
-  renvoie un `FrameResult` (masque et détection) sans ouvrir de fenêtre.
+  renvoie un `FrameResult` (masque, détection, compteur et pointes) sans fenêtre.
+  Réutilise le masque pour éviter une deuxième segmentation.
 - `rendering.py` : dessin des contours, de l'enveloppe, du rectangle et des textes.
 
 Pour traiter une image depuis un fichier, une vidéo ou une autre interface :
+
+Contrat minimal pour l'intégration entre les deux personnes :
+
+```python
+from hand_detection import detect_hand
+from finger_counting import count_fingers
+
+contour = detect_hand(frame)  # Pessoa A : frame BGR -> contour ou None
+count, fingertips = count_fingers(contour)  # Pessoa B : contour -> int, liste
+# Sans main : contour vaut None ; le compteur renvoie (0, []).
+```
+
+`detect_hand(frame, parameters)` accepte aussi les réglages facultatifs
+`ProcessingParameters` ; l'appel minimal utilise les valeurs par défaut.
+Les deux fonctions conservent leurs entrées sans les modifier.
+
+Pour conserver également le masque et les annotations :
 
 ```python
 import cv2 as cv
@@ -46,6 +66,8 @@ if frame is None:
     raise ValueError("Image introuvable")
 result = process_frame(frame, ProcessingParameters(min_area=2000))
 # result.mask : masque binaire ; result.detection : HandDetection ou None.
+# result.contour : contour ou None ; result.count : nombre de doigts.
+# result.fingertips : liste des coordonnées (x, y) des pointes.
 ```
 
 Le traitement ne modifie pas l'image source. `draw_detection` dans `rendering.py`
@@ -85,7 +107,10 @@ Le contour est vert, l'enveloppe convexe bleue et le rectangle jaune.
 La forme est décrite de façon indicative : compacte, allongée ou découpée.
 La solidité est le rapport entre l'aire du contour et celle de son enveloppe
 convexe. Une faible solidité peut correspondre à des doigts écartés.
-Cette heuristique ne compte pas les doigts et ne reconnaît pas des gestes.
+Le nombre de doigts estimé et les pointes rouges proviennent d'une heuristique
+géométrique distincte. Elle suppose une paume visible avec les doigts vers le
+haut et une silhouette propre ; les rotations, doigts joints et occultations
+peuvent produire une estimation incorrecte. Elle ne reconnaît pas des gestes.
 
 ## Protocole de test avec la webcam
 

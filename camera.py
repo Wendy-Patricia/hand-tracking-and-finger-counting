@@ -45,6 +45,10 @@ def main(argv=None):
             result = process_frame(frame, parameters)
             
             display = draw_detection(frame.copy(), result.detection)
+            for tip in result.fingertips:
+                cv.circle(display, tip, 6, (0, 0, 255), -1)
+            cv.putText(display, f"Doigts : {result.count}", (15, 130),
+                       cv.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
             cv.putText(display, "Q/Echap : quitter | R : reinitialiser", (15, 30), cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             
             cv.imshow(VIDEO_WINDOW, display)

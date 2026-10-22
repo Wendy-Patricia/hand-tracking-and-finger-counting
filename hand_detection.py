@@ -5,6 +5,9 @@ from dataclasses import dataclass
 import cv2 as cv
 import numpy as np
 
+from config import ProcessingParameters
+from segmentation import segment_hand
+
 
 @dataclass
 class HandDetection:
@@ -16,7 +19,20 @@ class HandDetection:
     shape: str
 
 
-def detect_hand(mask: np.ndarray, min_area: int = 3000) -> HandDetection | None:
+def detect_hand(
+    frame: np.ndarray, parameters: ProcessingParameters | None = None
+) -> np.ndarray | None:
+    """Pessoa A: recebe um frame BGR e devolve o contorno da mão ou None.
+
+    O argumento opcional permite usar os ajustes HSV da interface. O frame
+    original não é alterado.
+    """
+    parameters = parameters if parameters is not None else ProcessingParameters()
+    _, mask = segment_hand(frame, parameters)
+    return contour_from_mask(mask, parameters.min_area)
+
+
+def contour_from_mask(mask: np.ndarray, min_area: int = 3000) -> np.ndarray | None:
     """Retient le plus grand contour externe dépassant l'aire minimale.
 
     La description de forme est une heuristique géométrique, pas une
@@ -29,6 +45,12 @@ def detect_hand(mask: np.ndarray, min_area: int = 3000) -> HandDetection | None:
     area = cv.contourArea(contour)
     if area <= 0 or area < min_area:
         return None
+    return contour
+
+
+def describe_hand(contour: np.ndarray) -> HandDetection:
+    """Calcule les annotations sans changer le contrat public de détection."""
+    area = cv.contourArea(contour)
     hull = cv.convexHull(contour)
     hull_area = cv.contourArea(hull)
     solidity = area / hull_area if hull_area else 0.0
